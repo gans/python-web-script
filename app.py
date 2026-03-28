@@ -1,13 +1,12 @@
 import os
 import uuid
-import subprocess
-import sys
+import traceback
 from functools import wraps
 from datetime import datetime, timezone
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, flash, abort
+    session, flash, abort, Response
 )
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -21,9 +20,6 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
-
-SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "scripts")
-os.makedirs(SCRIPTS_DIR, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -85,27 +81,21 @@ def run_script(script_hash):
     if not script:
         abort(404)
 
-    script_file = os.path.join(SCRIPTS_DIR, f"{script_hash}.py")
-    with open(script_file, "w") as f:
-        f.write(script.code)
+    # Wrap user code in a function so `return` works as the output value
+    indented = "\n".join("    " + line for line in script.code.splitlines())
+    wrapped = f"def _main():\n{indented or '    pass'}\n\n_result = _main()\n"
 
     try:
-        result = subprocess.run(
-            [sys.executable, script_file],
-            capture_output=True, text=True, timeout=15
-        )
-        output = result.stdout
-        if result.stderr:
-            output += ("\n--- STDERR ---\n" + result.stderr) if output else result.stderr
-        success = result.returncode == 0
-    except subprocess.TimeoutExpired:
-        output = "Execution timed out (15 s limit)."
-        success = False
-    except Exception as e:
-        output = f"Error: {e}"
-        success = False
+        namespace: dict = {}
+        exec(wrapped, namespace)  # noqa: S102
+        output = namespace.get("_result", "")
+        status = 200
+    except Exception:
+        output = traceback.format_exc()
+        status = 500
 
-    return render_template("run_script.html", script=script.to_dict(), output=output, success=success)
+    return Response(str(output) if output is not None else "", status=status,
+                    mimetype="text/plain; charset=utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -206,9 +196,6 @@ def admin_delete(script_hash):
         name = script.name
         db.session.delete(script)
         db.session.commit()
-        script_file = os.path.join(SCRIPTS_DIR, f"{script_hash}.py")
-        if os.path.exists(script_file):
-            os.remove(script_file)
         flash(f'Script "{name}" deleted.', "success")
     return redirect(url_for("admin_index"))
 

@@ -7,11 +7,13 @@ import multiprocessing
 # Server socket
 bind = "0.0.0.0:8000"
 
-# Worker processes — 2-4 x number of CPUs is a good rule of thumb
+# Worker processes
 workers = multiprocessing.cpu_count() * 2 + 1
-worker_class = "sync"
+worker_class = "gthread"   # handles keep-alive without tying up whole workers
+threads = 2
 worker_connections = 1000
 timeout = 30
+keepalive = 5              # seconds to wait for next request on a keep-alive conn
 
 # Logging
 accesslog = "-"   # stdout
