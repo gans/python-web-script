@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ script.name }} · PyRunner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d0f14; --surface: #131720; --border: #1e2535;
+      --accent: #00e5a0; --accent2: #7c6aff;
+      --danger: #ff4d6d; --text: #c9d1e0; --muted: #505a72; --radius: 6px;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+      background-image: radial-gradient(ellipse at 50% 0%, rgba(0,229,160,.06) 0%, transparent 60%);
+    }
+    .wrap { width: 100%; max-width: 720px; }
+
+    .script-header { margin-bottom: 1.5rem; }
+    .script-header h1 {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1.6rem;
+      letter-spacing: -0.02em;
+    }
+    .script-header p { color: var(--muted); font-size: 0.82rem; margin-top: 0.3rem; }
+
+    .terminal {
+      background: #080a0f;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.7rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #febc2e; }
+    .dot-g { background: #28c840; }
+    .terminal-title { flex: 1; text-align: center; font-size: 0.75rem; color: var(--muted); }
+
+    .terminal-body {
+      padding: 1.25rem 1.5rem;
+      min-height: 120px;
+    }
+    .prompt {
+      color: var(--accent);
+      font-size: 0.78rem;
+      margin-bottom: 0.75rem;
+    }
+    .output {
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.8;
+      font-size: 0.88rem;
+    }
+    .output.success { color: var(--text); }
+    .output.error   { color: var(--danger); }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 1rem;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .status-ok  { color: var(--accent);  }
+    .status-err { color: var(--danger);  }
+
+    .footer { margin-top: 1.5rem; text-align: center; }
+    .footer a { color: var(--muted); font-size: 0.78rem; }
+    .footer a:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="script-header">
+      <h1>{{ script.name }}</h1>
+      {% if script.description %}
+        <p>{{ script.description }}</p>
+      {% endif %}
+    </div>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <span class="dot dot-r"></span>
+        <span class="dot dot-y"></span>
+        <span class="dot dot-g"></span>
+        <span class="terminal-title">python {{ script.hash }}.py</span>
+      </div>
+      <div class="terminal-body">
+        <div class="prompt">$ python {{ script.hash }}.py</div>
+        <pre class="output {{ 'success' if success else 'error' }}">{{ output if output else '(no output)' }}</pre>
+      </div>
+      <div class="status-bar">
+        <span>{{ script.created_at }}</span>
+        <span class="{{ 'status-ok' if success else 'status-err' }}">
+          {{ '✓ exit 0' if success else '✗ non-zero exit' }}
+        </span>
+      </div>
+    </div>
+
+    <div class="footer">
+      <a href="javascript:location.reload()">↺ Run again</a>
+    </div>
+  </div>
+</body>
+</html>
