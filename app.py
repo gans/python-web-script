@@ -8,8 +8,8 @@ from flask import (
     Flask, render_template, request, redirect, url_for,
     session, flash, abort, Response
 )
+import bcrypt
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production-please")
@@ -33,10 +33,10 @@ class User(db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
 
     def set_password(self, password: str):
-        self.password_hash = generate_password_hash(password)
+        self.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
     def check_password(self, password: str) -> bool:
-        return check_password_hash(self.password_hash, password)
+        return bcrypt.checkpw(password.encode(), self.password_hash.encode())
 
 
 class Script(db.Model):
