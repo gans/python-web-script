@@ -2,45 +2,43 @@
 
 A web app to **create, edit, delete and run Python scripts** via unique public URLs.
 
-- 🔒 **Authenticated admin** at `/admin/`
-- ▶️ **Public script runner** at `/<hash>/`
-- 🚀 **Gunicorn-ready** out of the box
+- **Authenticated admin** at `/admin/`
+- **Public script runner** at `/<hash>/` — returns raw plain-text output
+- **PostgreSQL** for persistent storage of users and scripts
+- **Gunicorn** (gthread workers) behind Docker
 
 ---
 
-## Quick Start
+## Stack
 
-### 1. Install dependencies
+| Layer | Technology |
+|-------|-----------|
+| Runtime | Python 3.12 on Ubuntu 24.04 LTS x64 |
+| Framework | Flask 3 |
+| Database | PostgreSQL 16 |
+| Server | Gunicorn (gthread workers) |
+| Container | Docker + Docker Compose |
+
+---
+
+## Quick Start (Docker)
+
+### 1. Configure credentials
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+cp .env.example .env
+# Edit .env and set SECRET_KEY, ADMIN_USER, ADMIN_PASS
 ```
 
-### 2. Set environment variables
+### 2. Build and run
 
 ```bash
-export SECRET_KEY="your-random-secret-key-here"
-export ADMIN_USER="admin"
-export ADMIN_PASS="your-secure-password"
-```
-
-Or create a `.env` file and load it with `python-dotenv`.
-
-### 3. Run with Gunicorn
-
-```bash
-gunicorn -c gunicorn.conf.py app:app
+docker compose up --build
 ```
 
 App is now at **http://localhost:8000**
 
-### 4. Development mode (Flask built-in server)
-
-```bash
-python app.py
-```
+The admin user is created automatically on first boot using the values in `.env`.
 
 ---
 
@@ -52,13 +50,50 @@ python app.py
 | `/admin/` | List all scripts |
 | `/admin/create` | Create a new script |
 | `/admin/edit/<hash>` | Edit an existing script |
-| `/<hash>/` | Run a script publicly |
+| `/<hash>/` | Run a script — returns raw plain-text output |
+
+---
+
+## Writing Scripts
+
+Scripts are written as a function body. Use `return` to produce the HTTP response:
+
+```python
+name = "world"
+return f"Hello, {name}!"
+```
+
+Visiting `/<hash>/` returns:
+
+```
+Hello, world!
+```
+
+Imports work normally:
+
+```python
+import datetime
+return datetime.date.today().isoformat()
+```
+
+Errors return a plain-text traceback with HTTP 500.
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SECRET_KEY` | `change-me-in-production` | Flask session signing key |
+| `DATABASE_URL` | `postgresql://pyrunner:pyrunner@db:5432/pyrunner` | PostgreSQL connection string |
+| `ADMIN_USER` | `admin` | Admin username (used on first boot) |
+| `ADMIN_PASS` | `admin123` | Admin password (used on first boot) |
 
 ---
 
 ## Production Tips
 
-### With Nginx (recommended)
+### Nginx reverse proxy
 
 ```nginx
 server {
@@ -74,29 +109,17 @@ server {
 }
 ```
 
-### Persistent storage
+### Stopping and restarting
 
-The default app uses an in-memory dict — **scripts are lost on restart**.  
-For production, swap `SCRIPTS = {}` in `app.py` with a SQLite or Postgres database using SQLAlchemy or similar.
+```bash
+docker compose down        # stop (data persists in postgres_data volume)
+docker compose up -d       # restart in background
+```
 
-### Systemd service
+### Wiping the database
 
-```ini
-[Unit]
-Description=PyRunner
-After=network.target
-
-[Service]
-User=www-data
-WorkingDirectory=/path/to/python-web-script
-Environment="SECRET_KEY=changeme"
-Environment="ADMIN_USER=admin"
-Environment="ADMIN_PASS=changeme"
-ExecStart=/path/to/.venv/bin/gunicorn -c gunicorn.conf.py app:app
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
+```bash
+docker compose down -v     # removes containers AND the postgres_data volume
 ```
 
 ---
