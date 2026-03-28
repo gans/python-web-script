@@ -28,9 +28,6 @@
     .editor-layout { grid-template-columns: 1fr; }
   }
 
-  .code-wrap {
-    position: relative;
-  }
   .code-label {
     display: flex;
     justify-content: space-between;
@@ -40,16 +37,37 @@
   .code-label label { margin: 0; }
   .line-count { font-size: 0.72rem; color: var(--muted); }
 
-  #code {
-    font-size: 0.88rem;
-    line-height: 1.7;
+  /* CodeMirror container */
+  #editor-mount {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
     min-height: 420px;
-    resize: vertical;
-    tab-size: 4;
-    background: #080a0f;
-    border-color: var(--border);
   }
-  #code:focus { border-color: var(--accent2); }
+  #editor-mount:focus-within {
+    border-color: var(--accent2);
+  }
+
+  /* Override CodeMirror internals to match app theme */
+  .cm-editor {
+    background: #080a0f !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.88rem !important;
+    min-height: 420px;
+  }
+  .cm-editor.cm-focused { outline: none !important; }
+  .cm-scroller { min-height: 420px; }
+  .cm-gutters {
+    background: #0d0f14 !important;
+    border-right: 1px solid var(--border) !important;
+    color: var(--muted) !important;
+    min-width: 3rem;
+  }
+  .cm-activeLineGutter { background: #131720 !important; color: var(--text) !important; }
+  .cm-activeLine { background: #131720 !important; }
+  .cm-cursor { border-left-color: var(--accent) !important; }
+  .cm-selectionBackground { background: rgba(124,106,255,.25) !important; }
+  .cm-matchingBracket { background: rgba(0,229,160,.15) !important; outline: 1px solid var(--accent); }
 
   .form-actions {
     display: flex;
@@ -85,7 +103,10 @@
     <a href="{{ url_for('admin_index') }}" class="btn btn-ghost">← Back</a>
   </div>
 
-  <form method="POST">
+  <form method="POST" id="script-form">
+    {# Hidden textarea that receives CodeMirror content on submit #}
+    <textarea id="code" name="code" style="display:none">{{ script.code if script else '' }}</textarea>
+
     <div class="editor-layout">
 
       <!-- Left: metadata -->
@@ -123,16 +144,13 @@
       <!-- Right: code editor -->
       <div>
         <div class="code-label">
-          <label for="code">Python Code</label>
+          <label>Python Code</label>
           <span class="line-count" id="line-count">0 lines</span>
         </div>
-        <div class="code-wrap">
-          <textarea id="code" name="code" spellcheck="false"
-                    placeholder="# Write your Python script here&#10;print('Hello, world!')">{{ script.code if script else '' }}</textarea>
-        </div>
+        <div id="editor-mount"></div>
         <p class="hint">
-          Output from <code>print()</code> statements will be displayed when the script is accessed via its public URL.
-          Execution is limited to 15 seconds.
+          Code runs as a function body — use <code>return</code> to send output to the browser.
+          Imports work normally. Execution is limited to 15 seconds.
         </p>
       </div>
 
@@ -140,37 +158,108 @@
   </form>
 </div>
 
-<script>
-// Tab key support in textarea
-document.getElementById('code').addEventListener('keydown', function(e) {
-  if (e.key === 'Tab') {
-    e.preventDefault();
-    const start = this.selectionStart;
-    const end   = this.selectionEnd;
-    this.value = this.value.substring(0, start) + '    ' + this.value.substring(end);
-    this.selectionStart = this.selectionEnd = start + 4;
-  }
+<script type="module">
+import { EditorView, keymap, lineNumbers, highlightActiveLine,
+         highlightActiveLineGutter, drawSelection, dropCursor,
+         rectangularSelection, crosshairCursor } from "https://esm.sh/@codemirror/view@6";
+import { EditorState, Compartment } from "https://esm.sh/@codemirror/state@6";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "https://esm.sh/@codemirror/commands@6";
+import { python } from "https://esm.sh/@codemirror/lang-python@6";
+import { bracketMatching, indentOnInput, syntaxHighlighting,
+         defaultHighlightStyle, foldGutter, foldKeymap } from "https://esm.sh/@codemirror/language@6";
+import { closeBrackets, closeBracketsKeymap, autocompletion,
+         completionKeymap } from "https://esm.sh/@codemirror/autocomplete@6";
+import { searchKeymap, highlightSelectionMatches } from "https://esm.sh/@codemirror/search@6";
+import { tags } from "https://esm.sh/@lezer/highlight@1";
+import { HighlightStyle } from "https://esm.sh/@codemirror/language@6";
+
+// Custom highlight style matching the app palette
+const pyrunnerHighlight = HighlightStyle.define([
+  { tag: tags.keyword,        color: "#7c6aff" },
+  { tag: tags.operator,       color: "#00e5a0" },
+  { tag: tags.number,         color: "#f0c060" },
+  { tag: tags.string,         color: "#70d090" },
+  { tag: tags.comment,        color: "#505a72", fontStyle: "italic" },
+  { tag: tags.function(tags.variableName), color: "#56b6f7" },
+  { tag: tags.className,      color: "#e5c07b" },
+  { tag: tags.definition(tags.variableName), color: "#c9d1e0" },
+  { tag: tags.variableName,   color: "#c9d1e0" },
+  { tag: tags.punctuation,    color: "#7a8599" },
+  { tag: tags.bool,           color: "#f0c060" },
+  { tag: tags.null,           color: "#f0c060" },
+  { tag: tags.typeName,       color: "#e5c07b" },
+  { tag: tags.self,           color: "#7c6aff" },
+  { tag: tags.meta,           color: "#505a72" },
+]);
+
+const initialCode = document.getElementById('code').value;
+
+const view = new EditorView({
+  state: EditorState.create({
+    doc: initialCode,
+    extensions: [
+      lineNumbers(),
+      highlightActiveLineGutter(),
+      highlightActiveLine(),
+      history(),
+      foldGutter(),
+      drawSelection(),
+      dropCursor(),
+      rectangularSelection(),
+      crosshairCursor(),
+      indentOnInput(),
+      bracketMatching(),
+      closeBrackets(),
+      autocompletion(),
+      highlightSelectionMatches(),
+      python(),
+      syntaxHighlighting(pyrunnerHighlight),
+      keymap.of([
+        {
+          key: "Mod-s",
+          run() {
+            document.getElementById('code').value = view.state.doc.toString();
+            document.getElementById('script-form').submit();
+            return true;
+          }
+        },
+        indentWithTab,
+        ...closeBracketsKeymap,
+        ...defaultKeymap,
+        ...historyKeymap,
+        ...foldKeymap,
+        ...completionKeymap,
+        ...searchKeymap,
+      ]),
+      EditorView.lineWrapping,
+    ],
+  }),
+  parent: document.getElementById('editor-mount'),
 });
 
-// Live line count
-const codeEl = document.getElementById('code');
-const lineCount = document.getElementById('line-count');
+// Sync line count
 function updateLines() {
-  const n = codeEl.value ? codeEl.value.split('\n').length : 0;
-  lineCount.textContent = n + ' line' + (n !== 1 ? 's' : '');
+  const n = view.state.doc.lines;
+  document.getElementById('line-count').textContent = n + ' line' + (n !== 1 ? 's' : '');
 }
-codeEl.addEventListener('input', updateLines);
 updateLines();
+view.dom.addEventListener('keyup', updateLines);
+view.dom.addEventListener('click', updateLines);
+
+// On submit, copy editor content to hidden textarea
+document.getElementById('script-form').addEventListener('submit', () => {
+  document.getElementById('code').value = view.state.doc.toString();
+});
 
 {% if script %}
-function copyHash(el) {
+window.copyHash = function(el) {
   const full = window.location.origin + '/{{ script.hash }}/';
   navigator.clipboard.writeText(full).then(() => {
     const orig = el.textContent;
     el.textContent = '✓ Copied!';
     setTimeout(() => { el.textContent = orig; }, 2000);
   });
-}
+};
 {% endif %}
 </script>
 {% endblock %}

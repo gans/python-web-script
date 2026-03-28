@@ -15,7 +15,7 @@ A web app to **create, edit, delete and run Python scripts** via unique public U
 |-------|-----------|
 | Runtime | Python 3.12 on Ubuntu 24.04 LTS x64 |
 | Framework | Flask 3 |
-| Database | PostgreSQL 16 |
+| Storage | PostgreSQL 16 **or** JSON files on disk |
 | Server | Gunicorn (gthread workers) |
 | Container | Docker + Docker Compose |
 
@@ -80,13 +80,46 @@ Errors return a plain-text traceback with HTTP 500.
 
 ---
 
+## Storage Backends
+
+### PostgreSQL (default)
+
+```bash
+# .env
+DB_BACKEND=postgres
+```
+
+```bash
+docker compose --profile postgres up --build
+```
+
+### Filesystem
+
+Stores `users.json` and `scripts.json` inside `FS_DATA_PATH`.
+
+```bash
+# .env
+DB_BACKEND=filesystem
+FS_DATA_PATH=/app/data   # path inside the container
+```
+
+```bash
+docker compose up --build   # no --profile needed, db service is skipped
+```
+
+Data is persisted in the `app_data` Docker volume across restarts.
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SECRET_KEY` | `change-me-in-production` | Flask session signing key |
-| `DATABASE_URL` | `postgresql://pyrunner:pyrunner@db:5432/pyrunner` | PostgreSQL connection string |
-| `ADMIN_USER` | `admin` | Admin username (used on first boot) |
+| `DB_BACKEND` | `postgres` | Storage backend: `postgres` or `filesystem` |
+| `DATABASE_URL` | `postgresql://pyrunner:pyrunner@db:5432/pyrunner` | PostgreSQL connection string (postgres backend only) |
+| `FS_DATA_PATH` | `/app/data` | Directory for JSON data files (filesystem backend only) |
+| `ADMIN_USER` | `admin` | Admin username (created on first boot if missing) |
 | `ADMIN_PASS` | `admin123` | Admin password (used on first boot) |
 
 ---
