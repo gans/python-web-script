@@ -2,6 +2,7 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    profiles: [postgres]
     environment:
       POSTGRES_USER: pyrunner
       POSTGRES_PASSWORD: pyrunner
@@ -21,12 +22,18 @@ services:
       - "8000:8000"
     environment:
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      DB_BACKEND: ${DB_BACKEND:-postgres}
+      # --- postgres ---
       DATABASE_URL: postgresql://pyrunner:pyrunner@db:5432/pyrunner
+      # --- filesystem: always /app/data inside the container ---
+      FS_DATA_PATH: /app/data
       ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASS: ${ADMIN_PASS:-admin123}
-    depends_on:
-      db:
-        condition: service_healthy
+    volumes:
+      # Bind-mount the host path (FS_DATA_PATH from .env) to /app/data inside
+      # the container. Falls back to a named volume when not set.
+      - ${FS_DATA_PATH:-app_data}:/app/data
 
 volumes:
   postgres_data:
+  app_data:

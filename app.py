@@ -8,55 +8,21 @@ from flask import (
     Flask, render_template, request, redirect, url_for,
     session, flash, abort, Response
 )
-import bcrypt
-from flask_sqlalchemy import SQLAlchemy
+
+from storage import make_storage
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production-please")
+
+# PostgreSQL URL (only used when DB_BACKEND=postgres)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
     "DATABASE_URL",
     "postgresql://pyrunner:pyrunner@localhost:5432/pyrunner"
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-db = SQLAlchemy(app)
-
-
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
-class User(db.Model):
-    __tablename__ = "users"
-
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256), nullable=False)
-
-    def set_password(self, password: str):
-        self.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
-    def check_password(self, password: str) -> bool:
-        return bcrypt.checkpw(password.encode(), self.password_hash.encode())
-
-
-class Script(db.Model):
-    __tablename__ = "scripts"
-
-    id = db.Column(db.Integer, primary_key=True)
-    hash = db.Column(db.String(32), unique=True, nullable=False, index=True)
-    name = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text, default="")
-    code = db.Column(db.Text, nullable=False, default="")
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-
-    def to_dict(self):
-        return {
-            "hash": self.hash,
-            "name": self.name,
-            "description": self.description,
-            "code": self.code,
-            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M UTC"),
-        }
+storage = make_storage()
+storage.init_app(app)
 
 
 # ---------------------------------------------------------------------------
@@ -77,12 +43,12 @@ def login_required(f):
 # ---------------------------------------------------------------------------
 @app.route("/<script_hash>/")
 def run_script(script_hash):
-    script = Script.query.filter_by(hash=script_hash).first()
+    script = storage.get_script(script_hash)
     if not script:
         abort(404)
 
     # Wrap user code in a function so `return` works as the output value
-    indented = "\n".join("    " + line for line in script.code.splitlines())
+    indented = "\n".join("    " + line for line in script["code"].splitlines())
     wrapped = f"def _main():\n{indented or '    pass'}\n\n_result = _main()\n"
 
     try:
@@ -109,8 +75,7 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        user = User.query.filter_by(username=username).first()
-        if user and user.check_password(password):
+        if storage.authenticate(username, password):
             session["logged_in"] = True
             session["username"] = username
             flash("Welcome back!", "success")
@@ -133,8 +98,7 @@ def logout():
 @app.route("/admin/")
 @login_required
 def admin_index():
-    scripts = Script.query.order_by(Script.created_at.desc()).all()
-    return render_template("admin/index.html", scripts=[s.to_dict() for s in scripts])
+    return render_template("admin/index.html", scripts=storage.list_scripts())
 
 
 # ---------------------------------------------------------------------------
@@ -152,14 +116,7 @@ def admin_create():
             flash("Script name is required.", "error")
             return render_template("admin/edit.html", script=None, action="Create")
 
-        script = Script(
-            hash=uuid.uuid4().hex[:12],
-            name=name,
-            description=description,
-            code=code,
-        )
-        db.session.add(script)
-        db.session.commit()
+        storage.create_script(name, description, code)
         flash(f'Script "{name}" created successfully.', "success")
         return redirect(url_for("admin_index"))
 
@@ -172,17 +129,19 @@ def admin_create():
 @app.route("/admin/edit/<script_hash>", methods=["GET", "POST"])
 @login_required
 def admin_edit(script_hash):
-    script = Script.query.filter_by(hash=script_hash).first_or_404()
+    script = storage.get_script(script_hash)
+    if not script:
+        abort(404)
 
     if request.method == "POST":
-        script.name = request.form.get("name", script.name).strip()
-        script.description = request.form.get("description", "").strip()
-        script.code = request.form.get("code", "")
-        db.session.commit()
-        flash(f'Script "{script.name}" updated.', "success")
+        name = request.form.get("name", script["name"]).strip()
+        description = request.form.get("description", "").strip()
+        code = request.form.get("code", "")
+        storage.update_script(script_hash, name, description, code)
+        flash(f'Script "{name}" updated.', "success")
         return redirect(url_for("admin_index"))
 
-    return render_template("admin/edit.html", script=script.to_dict(), action="Edit")
+    return render_template("admin/edit.html", script=script, action="Edit")
 
 
 # ---------------------------------------------------------------------------
@@ -191,11 +150,8 @@ def admin_edit(script_hash):
 @app.route("/admin/delete/<script_hash>", methods=["POST"])
 @login_required
 def admin_delete(script_hash):
-    script = Script.query.filter_by(hash=script_hash).first()
-    if script:
-        name = script.name
-        db.session.delete(script)
-        db.session.commit()
+    name = storage.delete_script(script_hash)
+    if name:
         flash(f'Script "{name}" deleted.', "success")
     return redirect(url_for("admin_index"))
 
